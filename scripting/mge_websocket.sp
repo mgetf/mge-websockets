@@ -9,24 +9,54 @@ public Plugin myinfo =
 {
     name = "MGE WebSocket Bridge",
     author = "MGE Community",
-    description = "Simple WebSocket interface for MGE commands",
-    version = "1.0.0",
+    description = "WebSocket interface for MGE real-time data",
+    version = "1.0",
     url = ""
 };
 
 // ===== WEBSOCKET SERVER =====
 
 WebSocketServer g_hWebSocketServer;
+ConVar g_cvPort;
+ConVar g_cvSecret;
+
+// String buffer sizes — tied to SourceMod / MGEMod field limits where applicable
+#define MGE_WS_PLAYER_NAME_MAX      MAX_NAME_LENGTH
+#define MGE_WS_STEAM_ID64_MAX       24
+#define MGE_WS_COMMAND_MAX            64
+#define MGE_WS_HOSTNAME_MAX           128
+#define MGE_WS_MAPNAME_MAX            64
+#define MGE_WS_STATUS_NAME_MAX        64
+#define MGE_WS_GAME_MODE_LIST_MAX     256
+#define MGE_WS_GAME_MODE_LABEL_MAX    32
+#define MGE_WS_ARENA_NAME_MAX         64    // MGEArenaInfo.name
+#define MGE_WS_SECRET_MAX             256
+#define MGE_WS_JSON_MAX               32768
 
 // ===== PLUGIN LIFECYCLE =====
 
 public void OnPluginStart()
 {
+    g_cvPort = CreateConVar("mge_ws_port", "9001", "WebSocket server listen port. Changing this value live will restart the server.", FCVAR_PROTECTED);
+    g_cvSecret = CreateConVar("mge_ws_secret", "", "Secret required for write commands (add/remove player, set ready). An empty value disables all write commands.", FCVAR_PROTECTED);
+
+    g_cvPort.AddChangeHook(OnPortConVarChanged);
+
     RegAdminCmd("mge_ws_start", Command_StartWebSocket, ADMFLAG_ROOT, "Start MGE WebSocket server");
     RegAdminCmd("mge_ws_stop", Command_StopWebSocket, ADMFLAG_ROOT, "Stop MGE WebSocket server");
-    
-    // Auto-start the server
+
     CreateTimer(2.0, Timer_StartWebSocket, _, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public void OnPortConVarChanged(ConVar convar, const char[] oldValue, const char[] newValue)
+{
+    if (g_hWebSocketServer != null)
+    {
+        g_hWebSocketServer.Stop();
+        delete g_hWebSocketServer;
+        g_hWebSocketServer = null;
+    }
+    StartWebSocketServer();
 }
 
 public void OnPluginEnd()
@@ -43,7 +73,7 @@ public void OnPluginEnd()
 Action Command_StartWebSocket(int client, int args)
 {
     StartWebSocketServer();
-    ReplyToCommand(client, "[MGE WS] WebSocket server started on port 9001");
+    ReplyToCommand(client, "[MGE WS] WebSocket server started on port %d", g_cvPort.IntValue);
     return Plugin_Handled;
 }
 
@@ -75,14 +105,15 @@ void StartWebSocketServer()
         return;
     }
     
-    g_hWebSocketServer = new WebSocketServer("0.0.0.0", 9001);
+    int port = g_cvPort.IntValue;
+    g_hWebSocketServer = new WebSocketServer("0.0.0.0", port);
     g_hWebSocketServer.SetMessageCallback(OnMessage);
     g_hWebSocketServer.SetOpenCallback(OnOpen);
     g_hWebSocketServer.SetCloseCallback(OnClose);
     g_hWebSocketServer.SetErrorCallback(OnError);
     g_hWebSocketServer.Start();
-    
-    PrintToServer("[MGE WS] Server started on port 9001");
+
+    PrintToServer("[MGE WS] Server started on port %d", port);
 }
 
 // ===== WEBSOCKET CALLBACKS =====
@@ -97,9 +128,7 @@ void OnOpen(WebSocketServer ws, const char[] RemoteAddr, const char[] RemoteId)
     welcome.SetString("message", "Connected to MGE WebSocket");
     welcome.SetInt("arenas", MGE_GetArenaCount());
     
-    char jsonStr[256];
-    welcome.ToString(jsonStr, sizeof(jsonStr));
-    ws.SendMessageToClient(RemoteId, jsonStr);
+    SendJsonToClient(ws, RemoteId, welcome);
     
     delete welcome;
 }
@@ -126,7 +155,7 @@ void OnMessage(WebSocketServer ws, WebSocket client, const char[] message, int w
         return;
     }
     
-    char command[64];
+    char command[MGE_WS_COMMAND_MAX];
     if (!request.GetString("command", command, sizeof(command)))
     {
         SendErrorResponse(ws, RemoteId, "Missing 'command' field");
@@ -209,6 +238,7 @@ void HandleGetArenas(WebSocketServer ws, const char[] clientId)
         arena.SetInt("game_mode", arenaInfo.gameMode);
         arena.SetString("game_mode_names", GetGameModeNames(arenaInfo.gameMode));
         arena.SetInt("frag_limit", arenaInfo.fragLimit);
+        AppendArenaScores(arena, i);
         
         arenas.Push(arena);
         delete arena;
@@ -216,10 +246,7 @@ void HandleGetArenas(WebSocketServer ws, const char[] clientId)
     
     response.Set("arenas", arenas);
     
-    // Convert to string and send
-    char jsonStr[8192];
-    response.ToString(jsonStr, sizeof(jsonStr));
-    ws.SendMessageToClient(clientId, jsonStr);
+    SendJsonToClient(ws, clientId, response);
     
     // Cleanup
     delete arenas;
@@ -241,12 +268,12 @@ void HandleGetPlayers(WebSocketServer ws, const char[] clientId)
         if (!IsClientInGame(client) || IsFakeClient(client))
             continue;
             
-        char name[64];
+        char name[MGE_WS_PLAYER_NAME_MAX];
         GetClientName(client, name, sizeof(name));
         
         JSONObject player = new JSONObject();
-        player.SetInt("id", client);
-        player.SetString("name", name);  // yyjson handles escaping automatically
+        SetJsonSteamId(player, "steam_id", client);
+        player.SetString("name", name);
         player.SetInt("arena", MGE_GetPlayerArena(client));
         player.SetBool("inArena", MGE_IsPlayerInArena(client));
         
@@ -267,10 +294,10 @@ void HandleGetPlayers(WebSocketServer ws, const char[] clientId)
             int teammate = MGE_GetPlayerTeammate(client);
             if (teammate > 0)
             {
-                char teammateName[64];
+                char teammateName[MGE_WS_PLAYER_NAME_MAX];
                 GetClientName(teammate, teammateName, sizeof(teammateName));
                 player.SetString("teammate", teammateName);
-                player.SetInt("teammate_id", teammate);
+                SetJsonSteamId(player, "teammate_steam_id", teammate);
             }
         }
         
@@ -280,10 +307,7 @@ void HandleGetPlayers(WebSocketServer ws, const char[] clientId)
     
     response.Set("players", players);
     
-    // Convert to string and send
-    char jsonStr[4096];
-    response.ToString(jsonStr, sizeof(jsonStr));
-    ws.SendMessageToClient(clientId, jsonStr);
+    SendJsonToClient(ws, clientId, response);
     
     // Cleanup
     delete players;
@@ -292,14 +316,18 @@ void HandleGetPlayers(WebSocketServer ws, const char[] clientId)
 
 void HandleAddPlayerToArena(WebSocketServer ws, const char[] clientId, JSONObject request)
 {
-    // Extract parameters from JSON
-    int playerId = request.GetInt("player_id");
-    int arenaId = request.GetInt("arena_id");
-    
-    // Validate parameters
-    if (playerId <= 0 || playerId > MaxClients || !IsClientInGame(playerId))
+    if (!IsWriteAuthorized(request))
     {
-        SendErrorResponse(ws, clientId, "Invalid player ID");
+        SendErrorResponse(ws, clientId, "Unauthorized: valid 'secret' required for write commands");
+        return;
+    }
+
+    int client = 0;
+    int arenaId = request.GetInt("arena_id");
+
+    if (!ResolveClientFromRequest(request, client))
+    {
+        SendErrorResponse(ws, clientId, "Invalid or missing steam_id");
         return;
     }
     
@@ -308,64 +336,108 @@ void HandleAddPlayerToArena(WebSocketServer ws, const char[] clientId, JSONObjec
         SendErrorResponse(ws, clientId, "Invalid arena ID");
         return;
     }
-    
-    // Attempt to add player to arena
-    bool success = MGE_AddPlayerToArena(playerId, arenaId);
+
+    MGEArenaInfo arenaInfo;
+    MGE_GetArenaInfo(arenaId, arenaInfo);
+
+    // Resolve target slot: explicit 'slot' takes priority, then 'team' preference for 2v2
+    int slot = request.GetInt("slot"); // 0 if absent = auto-assign
+
+    if (slot == 0)
+    {
+        char team[8];
+        if (request.GetString("team", team, sizeof(team)))
+        {
+            if (arenaInfo.is2v2)
+            {
+                // RED team occupies slots 1 and 3; BLU team occupies slots 2 and 4
+                if (StrEqual(team, "red", false))
+                {
+                    if (!MGE_GetArenaPlayer(arenaId, SLOT_ONE))
+                        slot = SLOT_ONE;
+                    else if (!MGE_GetArenaPlayer(arenaId, SLOT_THREE))
+                        slot = SLOT_THREE;
+                    else
+                    {
+                        SendErrorResponse(ws, clientId, "Red team slots are full");
+                        return;
+                    }
+                }
+                else if (StrEqual(team, "blu", false))
+                {
+                    if (!MGE_GetArenaPlayer(arenaId, SLOT_TWO))
+                        slot = SLOT_TWO;
+                    else if (!MGE_GetArenaPlayer(arenaId, SLOT_FOUR))
+                        slot = SLOT_FOUR;
+                    else
+                    {
+                        SendErrorResponse(ws, clientId, "Blu team slots are full");
+                        return;
+                    }
+                }
+                else
+                {
+                    SendErrorResponse(ws, clientId, "Invalid 'team' value: use 'red' or 'blu'");
+                    return;
+                }
+            }
+            // For 1v1 arenas, 'team' is meaningless — slot stays 0 (auto-assign)
+        }
+    }
+
+    bool success = MGE_AddPlayerToArena(client, arenaId, slot);
     
     JSONObject response = new JSONObject();
     if (success)
     {
-        char playerName[64];
-        GetClientName(playerId, playerName, sizeof(playerName));
+        char playerName[MGE_WS_PLAYER_NAME_MAX];
+        GetClientName(client, playerName, sizeof(playerName));
         
         response.SetString("type", "success");
         response.SetString("message", "Player added to arena successfully");
         response.SetString("player_name", playerName);
-        response.SetInt("player_id", playerId);
+        SetJsonSteamId(response, "steam_id", client);
         response.SetInt("arena_id", arenaId);
     }
     else
     {
         response.SetString("type", "error");
         response.SetString("message", "Failed to add player to arena");
-        response.SetInt("player_id", playerId);
+        SetJsonSteamId(response, "steam_id", client);
         response.SetInt("arena_id", arenaId);
     }
     
-    // Send response
-    char jsonStr[512];
-    response.ToString(jsonStr, sizeof(jsonStr));
-    ws.SendMessageToClient(clientId, jsonStr);
+    SendJsonToClient(ws, clientId, response);
     
     delete response;
 }
 
 void HandleRemovePlayerFromArena(WebSocketServer ws, const char[] clientId, JSONObject request)
 {
-    // Extract player ID from JSON
-    int playerId = request.GetInt("player_id");
-    
-    // Validate player
-    if (playerId <= 0 || playerId > MaxClients || !IsClientInGame(playerId))
+    if (!IsWriteAuthorized(request))
     {
-        SendErrorResponse(ws, clientId, "Invalid player ID");
+        SendErrorResponse(ws, clientId, "Unauthorized: valid 'secret' required for write commands");
+        return;
+    }
+
+    int client = 0;
+    if (!ResolveClientFromRequest(request, client))
+    {
+        SendErrorResponse(ws, clientId, "Invalid or missing steam_id");
         return;
     }
     
-    // Check if player is actually in an arena
-    if (!MGE_IsPlayerInArena(playerId))
+    if (!MGE_IsPlayerInArena(client))
     {
         SendErrorResponse(ws, clientId, "Player is not in an arena");
         return;
     }
     
-    // Get current arena for response
-    int currentArena = MGE_GetPlayerArena(playerId);
-    char playerName[64];
-    GetClientName(playerId, playerName, sizeof(playerName));
+    int currentArena = MGE_GetPlayerArena(client);
+    char playerName[MGE_WS_PLAYER_NAME_MAX];
+    GetClientName(client, playerName, sizeof(playerName));
     
-    // Attempt to remove player from arena
-    bool success = MGE_RemovePlayerFromArena(playerId);
+    bool success = MGE_RemovePlayerFromArena(client);
     
     JSONObject response = new JSONObject();
     if (success)
@@ -373,7 +445,7 @@ void HandleRemovePlayerFromArena(WebSocketServer ws, const char[] clientId, JSON
         response.SetString("type", "success");
         response.SetString("message", "Player removed from arena successfully");
         response.SetString("player_name", playerName);
-        response.SetInt("player_id", playerId);
+        SetJsonSteamId(response, "steam_id", client);
         response.SetInt("arena_id", currentArena);
     }
     else
@@ -381,39 +453,35 @@ void HandleRemovePlayerFromArena(WebSocketServer ws, const char[] clientId, JSON
         response.SetString("type", "error");
         response.SetString("message", "Failed to remove player from arena");
         response.SetString("player_name", playerName);
-        response.SetInt("player_id", playerId);
+        SetJsonSteamId(response, "steam_id", client);
         response.SetInt("arena_id", currentArena);
     }
     
-    // Send response
-    char jsonStr[512];
-    response.ToString(jsonStr, sizeof(jsonStr));
-    ws.SendMessageToClient(clientId, jsonStr);
+    SendJsonToClient(ws, clientId, response);
     
     delete response;
 }
 
 void HandleGetPlayerStats(WebSocketServer ws, const char[] clientId, JSONObject request)
 {
-    int playerId = request.GetInt("player_id");
-    
-    if (playerId <= 0 || playerId > MaxClients || !IsClientInGame(playerId))
+    int client = 0;
+    if (!ResolveClientFromRequest(request, client))
     {
-        SendErrorResponse(ws, clientId, "Invalid player ID");
+        SendErrorResponse(ws, clientId, "Invalid or missing steam_id");
         return;
     }
     
-    char playerName[64];
-    GetClientName(playerId, playerName, sizeof(playerName));
+    char playerName[MGE_WS_PLAYER_NAME_MAX];
+    GetClientName(client, playerName, sizeof(playerName));
     
     JSONObject response = new JSONObject();
     response.SetString("type", "response");
     response.SetString("command", "get_player_stats");
-    response.SetInt("player_id", playerId);
+    SetJsonSteamId(response, "steam_id", client);
     response.SetString("player_name", playerName);
     
     MGEPlayerStats stats;
-    if (MGE_GetPlayerStats(playerId, stats))
+    if (MGE_GetPlayerStats(client, stats))
     {
         JSONObject playerStats = new JSONObject();
         playerStats.SetInt("elo", stats.elo);
@@ -441,29 +509,27 @@ void HandleGetPlayerStats(WebSocketServer ws, const char[] clientId, JSONObject 
     }
     
     // Add current arena info
-    if (MGE_IsPlayerInArena(playerId))
+    if (MGE_IsPlayerInArena(client))
     {
-        int arena = MGE_GetPlayerArena(playerId);
+        int arena = MGE_GetPlayerArena(client);
         response.SetInt("current_arena", arena);
         response.SetBool("in_2v2", IsArena2v2_Safe(arena));
         
         if (IsArena2v2_Safe(arena))
         {
-            response.SetBool("ready", MGE_IsPlayerReady(playerId));
-            int teammate = MGE_GetPlayerTeammate(playerId);
+            response.SetBool("ready", MGE_IsPlayerReady(client));
+            int teammate = MGE_GetPlayerTeammate(client);
             if (teammate > 0)
             {
-                char teammateName[64];
+                char teammateName[MGE_WS_PLAYER_NAME_MAX];
                 GetClientName(teammate, teammateName, sizeof(teammateName));
                 response.SetString("teammate", teammateName);
-                response.SetInt("teammate_id", teammate);
+                SetJsonSteamId(response, "teammate_steam_id", teammate);
             }
         }
     }
     
-    char jsonStr[2048];
-    response.ToString(jsonStr, sizeof(jsonStr));
-    ws.SendMessageToClient(clientId, jsonStr);
+    SendJsonToClient(ws, clientId, response);
     
     delete response;
 }
@@ -500,6 +566,7 @@ void HandleGetArenaDetails(WebSocketServer ws, const char[] clientId, JSONObject
     response.SetInt("game_mode", arenaInfo.gameMode);
     response.SetString("game_mode_names", GetGameModeNames(arenaInfo.gameMode));
     response.SetInt("frag_limit", arenaInfo.fragLimit);
+    AppendArenaScores(response, arenaId);
     
     // Player slot details
     JSONArray slots = new JSONArray();
@@ -514,9 +581,9 @@ void HandleGetArenaDetails(WebSocketServer ws, const char[] clientId, JSONObject
         int player = MGE_GetArenaPlayer(arenaId, slot);
         if (player > 0 && IsClientInGame(player))
         {
-            char playerName[64];
+            char playerName[MGE_WS_PLAYER_NAME_MAX];
             GetClientName(player, playerName, sizeof(playerName));
-            slotInfo.SetInt("player_id", player);
+            SetJsonSteamId(slotInfo, "steam_id", player);
             slotInfo.SetString("player_name", playerName);
             slotInfo.SetBool("occupied", true);
             
@@ -537,49 +604,53 @@ void HandleGetArenaDetails(WebSocketServer ws, const char[] clientId, JSONObject
     response.Set("slots", slots);
     delete slots;
     
-    char jsonStr[2048];
-    response.ToString(jsonStr, sizeof(jsonStr));
-    ws.SendMessageToClient(clientId, jsonStr);
+    SendJsonToClient(ws, clientId, response);
     
     delete response;
 }
 
 void HandleSetPlayerReady(WebSocketServer ws, const char[] clientId, JSONObject request)
 {
-    int playerId = request.GetInt("player_id");
-    bool ready = request.GetBool("ready");
-    
-    if (playerId <= 0 || playerId > MaxClients || !IsClientInGame(playerId))
+    if (!IsWriteAuthorized(request))
     {
-        SendErrorResponse(ws, clientId, "Invalid player ID");
+        SendErrorResponse(ws, clientId, "Unauthorized: valid 'secret' required for write commands");
+        return;
+    }
+
+    int client = 0;
+    bool ready = request.GetBool("ready");
+
+    if (!ResolveClientFromRequest(request, client))
+    {
+        SendErrorResponse(ws, clientId, "Invalid or missing steam_id");
         return;
     }
     
-    if (!MGE_IsPlayerInArena(playerId))
+    if (!MGE_IsPlayerInArena(client))
     {
         SendErrorResponse(ws, clientId, "Player is not in an arena");
         return;
     }
     
-    int arena = MGE_GetPlayerArena(playerId);
+    int arena = MGE_GetPlayerArena(client);
     if (!IsArena2v2_Safe(arena))
     {
         SendErrorResponse(ws, clientId, "Player is not in a 2v2 arena");
         return;
     }
     
-    bool success = MGE_SetPlayerReady(playerId, ready);
+    bool success = MGE_SetPlayerReady(client, ready);
     
     JSONObject response = new JSONObject();
     if (success)
     {
-        char playerName[64];
-        GetClientName(playerId, playerName, sizeof(playerName));
+        char playerName[MGE_WS_PLAYER_NAME_MAX];
+        GetClientName(client, playerName, sizeof(playerName));
         
         response.SetString("type", "success");
         response.SetString("message", ready ? "Player marked as ready" : "Player marked as not ready");
         response.SetString("player_name", playerName);
-        response.SetInt("player_id", playerId);
+        SetJsonSteamId(response, "steam_id", client);
         response.SetInt("arena_id", arena);
         response.SetBool("ready", ready);
     }
@@ -587,13 +658,11 @@ void HandleSetPlayerReady(WebSocketServer ws, const char[] clientId, JSONObject 
     {
         response.SetString("type", "error");
         response.SetString("message", "Failed to set player ready status");
-        response.SetInt("player_id", playerId);
+        SetJsonSteamId(response, "steam_id", client);
         response.SetBool("ready", ready);
     }
     
-    char jsonStr[512];
-    response.ToString(jsonStr, sizeof(jsonStr));
-    ws.SendMessageToClient(clientId, jsonStr);
+    SendJsonToClient(ws, clientId, response);
     
     delete response;
 }
@@ -609,7 +678,7 @@ void HandleGetServerStatus(WebSocketServer ws, const char[] clientId)
     response.SetInt("current_clients", GetClientCount());
     response.SetInt("arena_count", MGE_GetArenaCount());
     
-    char hostname[128], mapname[64];
+    char hostname[MGE_WS_HOSTNAME_MAX], mapname[MGE_WS_MAPNAME_MAX];
     GetConVarString(FindConVar("hostname"), hostname, sizeof(hostname));
     GetCurrentMap(mapname, sizeof(mapname));
     
@@ -651,7 +720,7 @@ void HandleGetServerStatus(WebSocketServer ws, const char[] clientId)
     response.SetInt("ready_phases", readyPhases);
     
     // Add game mode breakdown
-    char gameModeNames[9][32] = {"MGE", "BBall", "KOTH", "Ammomod", "Midair", "Endif", "Ultiduo", "Turris", "2v2"};
+    char gameModeNames[9][MGE_WS_GAME_MODE_LABEL_MAX] = {"MGE", "BBall", "KOTH", "Ammomod", "Midair", "Endif", "Ultiduo", "Turris", "2v2"};
     for (int i = 0; i < 9; i++)
     {
         if (gameModeCount[i] > 0)
@@ -667,14 +736,37 @@ void HandleGetServerStatus(WebSocketServer ws, const char[] clientId)
     response.Set("game_mode_stats", gameModeStats);
     delete gameModeStats;
     
-    char jsonStr[2048];
-    response.ToString(jsonStr, sizeof(jsonStr));
-    ws.SendMessageToClient(clientId, jsonStr);
+    SendJsonToClient(ws, clientId, response);
     
     delete response;
 }
 
 // ===== HELPER FUNCTIONS =====
+
+bool IsWriteAuthorized(JSONObject request)
+{
+    char secret[MGE_WS_SECRET_MAX];
+    g_cvSecret.GetString(secret, sizeof(secret));
+
+    if (secret[0] == '\0')
+        return false;
+
+    char provided[MGE_WS_SECRET_MAX];
+    if (!request.GetString("secret", provided, sizeof(provided)))
+        return false;
+
+    return StrEqual(secret, provided, true);
+}
+
+bool SendJsonToClient(WebSocketServer ws, const char[] clientId, JSONObject obj)
+{
+    char json[MGE_WS_JSON_MAX];
+    if (obj.ToString(json, sizeof(json)) < 1)
+        return false;
+
+    ws.SendMessageToClient(clientId, json);
+    return true;
+}
 
 void SendErrorResponse(WebSocketServer ws, const char[] clientId, const char[] errorMessage)
 {
@@ -682,16 +774,14 @@ void SendErrorResponse(WebSocketServer ws, const char[] clientId, const char[] e
     response.SetString("type", "error");
     response.SetString("message", errorMessage);
     
-    char jsonStr[256];
-    response.ToString(jsonStr, sizeof(jsonStr));
-    ws.SendMessageToClient(clientId, jsonStr);
+    SendJsonToClient(ws, clientId, response);
     
     delete response;
 }
 
 char[] GetArenaStatusName(int status)
 {
-    char statusName[32];
+    char statusName[MGE_WS_STATUS_NAME_MAX];
     switch (status)
     {
         case 0: strcopy(statusName, sizeof(statusName), "🟢 Idle");        // AS_IDLE
@@ -708,7 +798,7 @@ char[] GetArenaStatusName(int status)
 
 char[] GetGameModeNames(int gameModeFlags)
 {
-    char modes[256];
+    char modes[MGE_WS_GAME_MODE_LIST_MAX];
     modes[0] = '\0';
     
     if (gameModeFlags & (1 << 0)) StrCat(modes, sizeof(modes), "🎯 MGE ");
@@ -740,13 +830,13 @@ public void MGE_OnPlayerArenaAdded(int client, int arena_index, int slot)
     if (!IsValidClient(client))
         return;
         
-    char playerName[64];
+    char playerName[MGE_WS_PLAYER_NAME_MAX];
     GetClientName(client, playerName, sizeof(playerName));
     
     JSONObject event = new JSONObject();
     event.SetString("type", "event");
     event.SetString("event", "player_arena_added");
-    event.SetInt("player_id", GetClientUserId(client));
+    SetJsonSteamId(event, "steam_id", client);
     event.SetString("player_name", playerName);
     event.SetInt("arena_id", arena_index);
     event.SetInt("slot", slot);
@@ -762,13 +852,13 @@ public void MGE_OnPlayerArenaRemoved(int client, int arena_index)
     if (!IsValidClient(client))
         return;
         
-    char playerName[64];
+    char playerName[MGE_WS_PLAYER_NAME_MAX];
     GetClientName(client, playerName, sizeof(playerName));
     
     JSONObject event = new JSONObject();
     event.SetString("type", "event");
     event.SetString("event", "player_arena_removed");
-    event.SetInt("player_id", GetClientUserId(client));
+    SetJsonSteamId(event, "steam_id", client);
     event.SetString("player_name", playerName);
     event.SetInt("arena_id", arena_index);
     event.SetInt("timestamp", GetTime());
@@ -783,7 +873,7 @@ public void MGE_On1v1MatchStart(int arena_index, int player1, int player2)
     if (!IsValidClient(player1) || !IsValidClient(player2))
         return;
         
-    char player1Name[64], player2Name[64];
+    char player1Name[MGE_WS_PLAYER_NAME_MAX], player2Name[MGE_WS_PLAYER_NAME_MAX];
     GetClientName(player1, player1Name, sizeof(player1Name));
     GetClientName(player2, player2Name, sizeof(player2Name));
     
@@ -791,14 +881,16 @@ public void MGE_On1v1MatchStart(int arena_index, int player1, int player2)
     event.SetString("type", "event");
     event.SetString("event", "match_start_1v1");
     event.SetInt("arena_id", arena_index);
-    event.SetInt("player1_id", GetClientUserId(player1));
+    SetJsonSteamId(event, "player1_steam_id", player1);
     event.SetString("player1_name", player1Name);
-    event.SetInt("player2_id", GetClientUserId(player2));
+    SetJsonSteamId(event, "player2_steam_id", player2);
     event.SetString("player2_name", player2Name);
     event.SetInt("timestamp", GetTime());
     
     BroadcastToAllClients(event);
     delete event;
+
+    BroadcastArenaScoreUpdate(arena_index);
 }
 
 // Called when a 1v1 match ends
@@ -807,7 +899,7 @@ public void MGE_On1v1MatchEnd(int arena_index, int winner, int loser, int winner
     if (!IsValidClient(winner) || !IsValidClient(loser))
         return;
         
-    char winnerName[64], loserName[64];
+    char winnerName[MGE_WS_PLAYER_NAME_MAX], loserName[MGE_WS_PLAYER_NAME_MAX];
     GetClientName(winner, winnerName, sizeof(winnerName));
     GetClientName(loser, loserName, sizeof(loserName));
     
@@ -815,9 +907,9 @@ public void MGE_On1v1MatchEnd(int arena_index, int winner, int loser, int winner
     event.SetString("type", "event");
     event.SetString("event", "match_end_1v1");
     event.SetInt("arena_id", arena_index);
-    event.SetInt("winner_id", GetClientUserId(winner));
+    SetJsonSteamId(event, "winner_steam_id", winner);
     event.SetString("winner_name", winnerName);
-    event.SetInt("loser_id", GetClientUserId(loser));
+    SetJsonSteamId(event, "loser_steam_id", loser);
     event.SetString("loser_name", loserName);
     event.SetInt("winner_score", winner_score);
     event.SetInt("loser_score", loser_score);
@@ -834,7 +926,8 @@ public void MGE_On2v2MatchStart(int arena_index, int team1_player1, int team1_pl
         !IsValidClient(team2_player1) || !IsValidClient(team2_player2))
         return;
         
-    char t1p1Name[64], t1p2Name[64], t2p1Name[64], t2p2Name[64];
+    char t1p1Name[MGE_WS_PLAYER_NAME_MAX], t1p2Name[MGE_WS_PLAYER_NAME_MAX];
+    char t2p1Name[MGE_WS_PLAYER_NAME_MAX], t2p2Name[MGE_WS_PLAYER_NAME_MAX];
     GetClientName(team1_player1, t1p1Name, sizeof(t1p1Name));
     GetClientName(team1_player2, t1p2Name, sizeof(t1p2Name));
     GetClientName(team2_player1, t2p1Name, sizeof(t2p1Name));
@@ -844,18 +937,20 @@ public void MGE_On2v2MatchStart(int arena_index, int team1_player1, int team1_pl
     event.SetString("type", "event");
     event.SetString("event", "match_start_2v2");
     event.SetInt("arena_id", arena_index);
-    event.SetInt("team1_player1_id", GetClientUserId(team1_player1));
+    SetJsonSteamId(event, "team1_player1_steam_id", team1_player1);
     event.SetString("team1_player1_name", t1p1Name);
-    event.SetInt("team1_player2_id", GetClientUserId(team1_player2));
+    SetJsonSteamId(event, "team1_player2_steam_id", team1_player2);
     event.SetString("team1_player2_name", t1p2Name);
-    event.SetInt("team2_player1_id", GetClientUserId(team2_player1));
+    SetJsonSteamId(event, "team2_player1_steam_id", team2_player1);
     event.SetString("team2_player1_name", t2p1Name);
-    event.SetInt("team2_player2_id", GetClientUserId(team2_player2));
+    SetJsonSteamId(event, "team2_player2_steam_id", team2_player2);
     event.SetString("team2_player2_name", t2p2Name);
     event.SetInt("timestamp", GetTime());
     
     BroadcastToAllClients(event);
     delete event;
+
+    BroadcastArenaScoreUpdate(arena_index);
 }
 
 // Called when a 2v2 match ends
@@ -866,7 +961,8 @@ public void MGE_On2v2MatchEnd(int arena_index, int winning_team, int winning_sco
         !IsValidClient(team2_player1) || !IsValidClient(team2_player2))
         return;
         
-    char t1p1Name[64], t1p2Name[64], t2p1Name[64], t2p2Name[64];
+    char t1p1Name[MGE_WS_PLAYER_NAME_MAX], t1p2Name[MGE_WS_PLAYER_NAME_MAX];
+    char t2p1Name[MGE_WS_PLAYER_NAME_MAX], t2p2Name[MGE_WS_PLAYER_NAME_MAX];
     GetClientName(team1_player1, t1p1Name, sizeof(t1p1Name));
     GetClientName(team1_player2, t1p2Name, sizeof(t1p2Name));
     GetClientName(team2_player1, t2p1Name, sizeof(t2p1Name));
@@ -879,13 +975,13 @@ public void MGE_On2v2MatchEnd(int arena_index, int winning_team, int winning_sco
     event.SetInt("winning_team", winning_team);
     event.SetInt("winning_score", winning_score);
     event.SetInt("losing_score", losing_score);
-    event.SetInt("team1_player1_id", GetClientUserId(team1_player1));
+    SetJsonSteamId(event, "team1_player1_steam_id", team1_player1);
     event.SetString("team1_player1_name", t1p1Name);
-    event.SetInt("team1_player2_id", GetClientUserId(team1_player2));
+    SetJsonSteamId(event, "team1_player2_steam_id", team1_player2);
     event.SetString("team1_player2_name", t1p2Name);
-    event.SetInt("team2_player1_id", GetClientUserId(team2_player1));
+    SetJsonSteamId(event, "team2_player1_steam_id", team2_player1);
     event.SetString("team2_player1_name", t2p1Name);
-    event.SetInt("team2_player2_id", GetClientUserId(team2_player2));
+    SetJsonSteamId(event, "team2_player2_steam_id", team2_player2);
     event.SetString("team2_player2_name", t2p2Name);
     event.SetInt("timestamp", GetTime());
     
@@ -899,7 +995,7 @@ public void MGE_OnArenaPlayerDeath(int victim, int attacker, int arena_index)
     if (!IsValidClient(victim))
         return;
         
-    char victimName[64], attackerName[64];
+    char victimName[MGE_WS_PLAYER_NAME_MAX], attackerName[MGE_WS_PLAYER_NAME_MAX];
     GetClientName(victim, victimName, sizeof(victimName));
     
     if (IsValidClient(attacker))
@@ -910,9 +1006,9 @@ public void MGE_OnArenaPlayerDeath(int victim, int attacker, int arena_index)
     JSONObject event = new JSONObject();
     event.SetString("type", "event");
     event.SetString("event", "arena_player_death");
-    event.SetInt("victim_id", GetClientUserId(victim));
+    SetJsonSteamId(event, "victim_steam_id", victim);
     event.SetString("victim_name", victimName);
-    event.SetInt("attacker_id", IsValidClient(attacker) ? GetClientUserId(attacker) : 0);
+    SetJsonSteamId(event, "attacker_steam_id", attacker);
     event.SetString("attacker_name", attackerName);
     event.SetInt("arena_id", arena_index);
     event.SetInt("timestamp", GetTime());
@@ -927,13 +1023,13 @@ public void MGE_OnPlayerELOChange(int client, int old_elo, int new_elo, int aren
     if (!IsValidClient(client))
         return;
         
-    char playerName[64];
+    char playerName[MGE_WS_PLAYER_NAME_MAX];
     GetClientName(client, playerName, sizeof(playerName));
     
     JSONObject event = new JSONObject();
     event.SetString("type", "event");
     event.SetString("event", "player_elo_change");
-    event.SetInt("player_id", GetClientUserId(client));
+    SetJsonSteamId(event, "steam_id", client);
     event.SetString("player_name", playerName);
     event.SetInt("old_elo", old_elo);
     event.SetInt("new_elo", new_elo);
@@ -964,13 +1060,13 @@ public void MGE_On2v2PlayerReady(int client, int arena_index, bool ready_status)
     if (!IsValidClient(client))
         return;
         
-    char playerName[64];
+    char playerName[MGE_WS_PLAYER_NAME_MAX];
     GetClientName(client, playerName, sizeof(playerName));
     
     JSONObject event = new JSONObject();
     event.SetString("type", "event");
     event.SetString("event", "2v2_player_ready");
-    event.SetInt("player_id", GetClientUserId(client));
+    SetJsonSteamId(event, "steam_id", client);
     event.SetString("player_name", playerName);
     event.SetInt("arena_id", arena_index);
     event.SetBool("ready_status", ready_status);
@@ -980,12 +1076,68 @@ public void MGE_On2v2PlayerReady(int client, int arena_index, bool ready_status)
     delete event;
 }
 
+// Called when arena team scores change or are reset
+public void MGE_OnArenaScoreChange(int arena_index, int red_score, int blu_score)
+{
+    if (!MGE_IsValidArena(arena_index))
+        return;
+
+    BroadcastArenaScoreUpdateEx(arena_index, red_score, blu_score);
+}
+
 // ===== UTILITY FUNCTIONS =====
 
 // Validates if a client is valid and in-game
 bool IsValidClient(int client)
 {
     return (client > 0 && client <= MaxClients && IsClientConnected(client) && IsClientInGame(client));
+}
+
+bool GetClientSteamId64(int client, char[] steamId, int maxlen)
+{
+    steamId[0] = '\0';
+
+    if (!IsValidClient(client))
+        return false;
+
+    return GetClientAuthId(client, AuthId_SteamID64, steamId, maxlen);
+}
+
+int FindClientBySteamId64(const char[] steamId)
+{
+    if (steamId[0] == '\0')
+        return 0;
+
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (!IsClientInGame(i))
+            continue;
+
+        char clientSteamId[MGE_WS_STEAM_ID64_MAX];
+        if (GetClientSteamId64(i, clientSteamId, sizeof(clientSteamId)) && StrEqual(clientSteamId, steamId))
+            return i;
+    }
+
+    return 0;
+}
+
+bool ResolveClientFromRequest(JSONObject request, int &client)
+{
+    char steamId[MGE_WS_STEAM_ID64_MAX];
+    if (!request.GetString("steam_id", steamId, sizeof(steamId)) || steamId[0] == '\0')
+        return false;
+
+    client = FindClientBySteamId64(steamId);
+    return client > 0;
+}
+
+void SetJsonSteamId(JSONObject obj, const char[] key, int client)
+{
+    char steamId[MGE_WS_STEAM_ID64_MAX];
+    if (GetClientSteamId64(client, steamId, sizeof(steamId)))
+        obj.SetString(key, steamId);
+    else
+        obj.SetString(key, "");
 }
 
 
@@ -1030,9 +1182,55 @@ void BroadcastToAllClients(JSONObject event)
 {
     if (g_hWebSocketServer == null)
         return;
-    
-    char json[2048];
-    event.ToString(json, sizeof(json));
-    
+
+    char json[MGE_WS_JSON_MAX];
+    if (event.ToString(json, sizeof(json)) < 1)
+        return;
+
     g_hWebSocketServer.BroadcastMessage(json);
+}
+
+// Broadcasts the current arena score state to all WebSocket clients
+void BroadcastArenaScoreUpdate(int arena_index)
+{
+    BroadcastArenaScoreUpdateEx(arena_index, MGE_GetArenaScore(arena_index, SLOT_ONE), MGE_GetArenaScore(arena_index, SLOT_TWO));
+}
+
+void BroadcastArenaScoreUpdateEx(int arena_index, int red_score, int blu_score)
+{
+    if (!MGE_IsValidArena(arena_index))
+        return;
+
+    int fragLimit = 0;
+    MGEArenaInfo arenaInfo;
+
+    JSONObject event = new JSONObject();
+    event.SetString("type", "event");
+    event.SetString("event", "score_update");
+    event.SetInt("arena_id", arena_index);
+
+    if (MGE_GetArenaInfo(arena_index, arenaInfo))
+    {
+        event.SetString("arena_name", arenaInfo.name);
+        fragLimit = arenaInfo.fragLimit;
+    }
+    else
+    {
+        event.SetString("arena_name", "");
+    }
+
+    event.SetInt("red_score", red_score);
+    event.SetInt("blu_score", blu_score);
+    event.SetInt("frag_limit", fragLimit);
+    event.SetInt("timestamp", GetTime());
+
+    BroadcastToAllClients(event);
+    delete event;
+}
+
+// Adds red/blu score fields to a JSON object for an arena
+void AppendArenaScores(JSONObject obj, int arena_index)
+{
+    obj.SetInt("red_score", MGE_GetArenaScore(arena_index, SLOT_ONE));
+    obj.SetInt("blu_score", MGE_GetArenaScore(arena_index, SLOT_TWO));
 }

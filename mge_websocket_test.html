@@ -331,6 +331,152 @@
                 opacity: 0;
             }
         }
+
+        .score-showcase {
+            border: 3px solid #fd7e14;
+            background: linear-gradient(135deg, #fff8f0 0%, #ffffff 100%);
+        }
+
+        .score-showcase h2 {
+            color: #c05600;
+            margin-top: 0;
+        }
+
+        .score-showcase-subtitle {
+            color: #6c757d;
+            margin: -8px 0 16px 0;
+            font-size: 14px;
+        }
+
+        .live-scoreboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .score-card {
+            border: 2px solid #dee2e6;
+            border-radius: 10px;
+            padding: 16px;
+            background: white;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+        }
+
+        .score-card.active {
+            border-color: #fd7e14;
+            box-shadow: 0 4px 16px rgba(253, 126, 20, 0.25);
+        }
+
+        .score-card.flash {
+            animation: scoreFlash 0.6s ease;
+        }
+
+        @keyframes scoreFlash {
+            0% { transform: scale(1); background: white; }
+            30% { transform: scale(1.03); background: #fff3cd; }
+            100% { transform: scale(1); background: white; }
+        }
+
+        .score-card-header {
+            font-size: 13px;
+            color: #6c757d;
+            margin-bottom: 8px;
+        }
+
+        .score-card-name {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 12px;
+        }
+
+        .score-display {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            font-size: 42px;
+            font-weight: bold;
+            line-height: 1;
+        }
+
+        .score-red {
+            color: #dc3545;
+            min-width: 48px;
+            text-align: center;
+        }
+
+        .score-blu {
+            color: #007bff;
+            min-width: 48px;
+            text-align: center;
+        }
+
+        .score-separator {
+            color: #adb5bd;
+            font-size: 32px;
+        }
+
+        .score-meta {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #6c757d;
+            text-align: center;
+        }
+
+        .score-events-log {
+            background: #1e1e1e;
+            color: #f8f9fa;
+            border-radius: 6px;
+            padding: 12px;
+            height: 160px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 13px;
+        }
+
+        .score-events-log .score-event-line {
+            padding: 4px 0;
+            border-bottom: 1px solid #333;
+        }
+
+        .score-events-log .score-event-line:last-child {
+            border-bottom: none;
+        }
+
+        .score-events-log .event-push {
+            color: #ffc107;
+        }
+
+        .score-events-log .event-poll {
+            color: #20c997;
+        }
+
+        .table-score {
+            font-size: 18px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        .table-score .score-red,
+        .table-score .score-blu {
+            font-size: 18px;
+            min-width: auto;
+        }
+
+        .details-score-banner {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            padding: 20px;
+            margin: 16px 0;
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            font-size: 48px;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -340,8 +486,28 @@
         <h2>Connection</h2>
         <div id="status" class="status disconnected">Disconnected</div>
         <input type="text" id="serverUrl" value="ws://localhost:9001" placeholder="WebSocket URL">
+        <input type="password" id="wsSecret" placeholder="Write secret (mge_ws_secret)" style="width: 220px;">
         <button onclick="connect()">Connect</button>
         <button onclick="disconnect()">Disconnect</button>
+        <p style="margin: 6px 0 0; font-size: 12px; color: #6c757d;">
+            The write secret is required for add/remove player and set-ready commands. Set <code>mge_ws_secret</code> on the server.
+        </p>
+    </div>
+
+    <div class="container score-showcase">
+        <h2>Live Arena Scores</h2>
+        <p class="score-showcase-subtitle">
+            Real-time via <strong>score_update</strong> push events &middot;
+            Polled via <strong>get_arenas</strong> / <strong>get_arena_details</strong> (<code>red_score</code>, <code>blu_score</code>)
+        </p>
+        <div id="liveScoreboard" class="live-scoreboard">
+            <p style="color: #6c757d; grid-column: 1 / -1;">Connect and start a match to see live scores...</p>
+        </div>
+        <h3>Score Event Feed</h3>
+        <div id="scoreEventsLog" class="score-events-log">
+            <div class="score-event-line">Waiting for score events...</div>
+        </div>
+        <button onclick="clearScoreEventsLog()" style="margin-top: 8px;">Clear Score Feed</button>
     </div>
     
     <div class="container">
@@ -367,8 +533,13 @@
                 <select id="playerSelect">
                     <option value="">Select Player...</option>
                 </select>
-                <select id="arenaSelect">
+                <select id="arenaSelect" onchange="onArenaSelectChange()">
                     <option value="">Select Arena...</option>
+                </select>
+                <select id="teamSelect" style="display: none;">
+                    <option value="">Auto-assign team</option>
+                    <option value="red">🔴 Red team</option>
+                    <option value="blu">🔵 Blu team</option>
                 </select>
                 <button onclick="addPlayerToArena()" id="addPlayerBtn">Add to Arena</button>
             </div>
@@ -413,6 +584,7 @@
                 <tr>
                     <th>Arena</th>
                     <th class="status-cell">Status</th>
+                    <th>Score</th>
                     <th>Occupancy</th>
                     <th class="gamemode-cell">Game Mode</th>
                     <th class="players-cell">Players</th>
@@ -445,6 +617,9 @@
         let arenas = [];
         let players = [];
         let serverStats = null;
+        let arenaScores = {};
+        let trackedArenas = new Set();
+        let scoreEventCount = 0;
         let currentGameModeFilter = 'all';
         let currentStatusFilter = 'all';
         
@@ -514,6 +689,10 @@
             }
         }
         
+        function getSecret() {
+            return document.getElementById('wsSecret').value || '';
+        }
+
         function send(message) {
             if (ws && ws.readyState === WebSocket.OPEN) {
                 const msgStr = JSON.stringify(message);
@@ -534,7 +713,10 @@
                 case 'response':
                     if (data.command === 'get_arenas') {
                         arenas = data.arenas;
+                        syncArenaScoresFromArenas(data.arenas, 'poll');
+                        checkTrackedArenas();
                         updateArenaDisplay();
+                        updateLiveScoreboard();
                         updateArenaSelect();
                     } else if (data.command === 'get_players') {
                         players = data.players;
@@ -546,6 +728,9 @@
                     } else if (data.command === 'get_player_stats') {
                         showPlayerStatsModal(data);
                     } else if (data.command === 'get_arena_details') {
+                        syncArenaScore(data.arena_id, data.red_score, data.blu_score, data.frag_limit, data.arena_name, 'poll');
+                        updateLiveScoreboard(data.arena_id);
+                        updateArenaDisplay();
                         showArenaDetailsModal(data);
                     }
                     break;
@@ -590,23 +775,27 @@
                     log(`🚪 [${eventTime}] ${data.player_name} left ${getArenaName(data.arena_id)}`);
                     showEventNotification(`${data.player_name} left arena`, 'info');
                     refreshArenaAndPlayerData();
+                    setTimeout(() => checkTrackedArenas(), 600);
                     break;
                     
                 case 'match_start_1v1':
                     log(`⚔️ [${eventTime}] 1v1 Match Started: ${data.player1_name} vs ${data.player2_name} in ${getArenaName(data.arena_id)}`);
                     showEventNotification(`1v1 Match: ${data.player1_name} vs ${data.player2_name}`, 'match');
+                    trackArena(data.arena_id);
                     refreshArenaData();
                     break;
                     
                 case 'match_end_1v1':
                     log(`🏆 [${eventTime}] 1v1 Match Ended: ${data.winner_name} beat ${data.loser_name} (${data.winner_score}-${data.loser_score}) in ${getArenaName(data.arena_id)}`);
                     showEventNotification(`${data.winner_name} won ${data.winner_score}-${data.loser_score}`, 'victory');
+                    untrackArena(data.arena_id, 'match ended');
                     refreshArenaAndPlayerData();
                     break;
                     
                 case 'match_start_2v2':
                     log(`👥 [${eventTime}] 2v2 Match Started: ${data.team1_player1_name} & ${data.team1_player2_name} vs ${data.team2_player1_name} & ${data.team2_player2_name} in ${getArenaName(data.arena_id)}`);
                     showEventNotification(`2v2 Match Started`, 'match');
+                    trackArena(data.arena_id);
                     refreshArenaData();
                     break;
                     
@@ -614,6 +803,7 @@
                     const winningTeamStr = data.winning_team === 2 ? "Red Team" : "Blue Team";
                     log(`🏆 [${eventTime}] 2v2 Match Ended: ${winningTeamStr} won (${data.winning_score}-${data.losing_score}) in ${getArenaName(data.arena_id)}`);
                     showEventNotification(`${winningTeamStr} won ${data.winning_score}-${data.losing_score}`, 'victory');
+                    untrackArena(data.arena_id, 'match ended');
                     refreshArenaAndPlayerData();
                     break;
                     
@@ -641,6 +831,10 @@
                     log(`✅ [${eventTime}] ${data.player_name} ${readyStr} in ${getArenaName(data.arena_id)}`);
                     refreshArenaAndPlayerData();
                     break;
+
+                case 'score_update':
+                    handleScoreUpdate(data, eventTime);
+                    break;
                     
                 default:
                     log(`❓ [${eventTime}] Unknown event: ${data.event}`);
@@ -651,6 +845,151 @@
         function getArenaName(arenaId) {
             const arena = arenas.find(a => a.id === arenaId);
             return arena ? arena.name : `Arena ${arenaId}`;
+        }
+
+        function trackArena(arenaId) {
+            trackedArenas.add(arenaId);
+        }
+
+        function untrackArena(arenaId, reason = '') {
+            if (!trackedArenas.has(arenaId))
+                return;
+
+            trackedArenas.delete(arenaId);
+            delete arenaScores[arenaId];
+
+            const arena = arenas.find(a => a.id === arenaId);
+            if (arena) {
+                delete arena.red_score;
+                delete arena.blu_score;
+            }
+
+            if (reason) {
+                logScoreEvent(`<span style="color:#adb5bd">[CLOSED]</span> ${getArenaName(arenaId)} — ${reason}`);
+            }
+
+            updateLiveScoreboard();
+            updateArenaDisplay();
+        }
+
+        function checkTrackedArenas() {
+            for (const arenaId of [...trackedArenas]) {
+                const arena = arenas.find(a => a.id === arenaId);
+                if (!arena || arena.status === 0 || arena.players < 2) {
+                    untrackArena(arenaId, 'match no longer active');
+                }
+            }
+        }
+
+        function formatScoreDisplay(red, blu, large = false) {
+            const cls = large ? '' : 'table-score';
+            return `<span class="${cls}"><span class="score-red">${red}</span><span class="score-separator">–</span><span class="score-blu">${blu}</span></span>`;
+        }
+
+        function syncArenaScore(arenaId, redScore, bluScore, fragLimit, arenaName, source) {
+            const existing = arenaScores[arenaId] || {};
+            const changed = existing.red_score !== redScore || existing.blu_score !== bluScore;
+
+            arenaScores[arenaId] = {
+                arena_id: arenaId,
+                arena_name: arenaName || existing.arena_name || getArenaName(arenaId),
+                red_score: redScore,
+                blu_score: bluScore,
+                frag_limit: fragLimit ?? existing.frag_limit ?? 0,
+                updated_at: Date.now(),
+                source: source
+            };
+
+            const arena = arenas.find(a => a.id === arenaId);
+            if (arena) {
+                arena.red_score = redScore;
+                arena.blu_score = bluScore;
+            }
+
+            if (changed) {
+                const label = source === 'push'
+                    ? '<span class="event-push">[PUSH] score_update</span>'
+                    : '<span class="event-poll">[POLL] get_arenas/details</span>';
+                logScoreEvent(`${label} ${arenaScores[arenaId].arena_name}: <strong>${redScore}–${bluScore}</strong>`);
+            }
+
+            return changed;
+        }
+
+        function syncArenaScoresFromArenas(arenaList, source) {
+            arenaList.forEach(arena => {
+                if (arena.red_score !== undefined && arena.blu_score !== undefined) {
+                    syncArenaScore(arena.id, arena.red_score, arena.blu_score, arena.frag_limit, arena.name, source);
+                }
+            });
+        }
+
+        function handleScoreUpdate(data, eventTime) {
+            trackArena(data.arena_id);
+
+            const changed = syncArenaScore(
+                data.arena_id,
+                data.red_score,
+                data.blu_score,
+                data.frag_limit,
+                data.arena_name,
+                'push'
+            );
+
+            log(`📣 [${eventTime}] SCORE UPDATE: ${data.arena_name || getArenaName(data.arena_id)} → ${data.red_score}–${data.blu_score}${data.frag_limit ? ` (first to ${data.frag_limit})` : ''}`);
+            showEventNotification(`${data.arena_name || 'Arena ' + data.arena_id}: ${data.red_score}–${data.blu_score}`, 'match');
+            updateLiveScoreboard(data.arena_id, true);
+            updateArenaDisplay();
+        }
+
+        function logScoreEvent(html) {
+            scoreEventCount++;
+            const feed = document.getElementById('scoreEventsLog');
+            const timestamp = new Date().toLocaleTimeString();
+            const line = document.createElement('div');
+            line.className = 'score-event-line';
+            line.innerHTML = `[${timestamp}] #${scoreEventCount} ${html}`;
+            feed.insertBefore(line, feed.firstChild);
+
+            while (feed.children.length > 50) {
+                feed.removeChild(feed.lastChild);
+            }
+        }
+
+        function clearScoreEventsLog() {
+            document.getElementById('scoreEventsLog').innerHTML = '<div class="score-event-line">Score feed cleared.</div>';
+            scoreEventCount = 0;
+        }
+
+        function updateLiveScoreboard(flashArenaId = null, shouldFlash = false) {
+            const board = document.getElementById('liveScoreboard');
+            const entries = Object.values(arenaScores).filter(s => trackedArenas.has(s.arena_id));
+
+            if (entries.length === 0) {
+                board.innerHTML = '<p style="color: #6c757d; grid-column: 1 / -1;">No active matches tracked. Cards appear on <code>score_update</code> (including 0–0 at match start).</p>';
+                return;
+            }
+
+            entries.sort((a, b) => a.arena_id - b.arena_id);
+            board.innerHTML = entries.map(score => {
+                const arena = arenas.find(a => a.id === score.arena_id);
+                const isFighting = arena && arena.status === 3;
+                const isCountdown = arena && (arena.status === 1 || arena.status === 2);
+                const statusLabel = isFighting ? 'FIGHTING' : isCountdown ? 'COUNTDOWN' : 'active';
+                const flashClass = flashArenaId === score.arena_id && shouldFlash ? ' flash' : '';
+                return `
+                    <div class="score-card${isFighting || isCountdown ? ' active' : ''}${flashClass}" id="score-card-${score.arena_id}">
+                        <div class="score-card-header">Arena ${score.arena_id} · ${statusLabel}</div>
+                        <div class="score-card-name">${score.arena_name}</div>
+                        <div class="score-display">
+                            <span class="score-red">${score.red_score}</span>
+                            <span class="score-separator">–</span>
+                            <span class="score-blu">${score.blu_score}</span>
+                        </div>
+                        <div class="score-meta">${score.frag_limit ? `First to ${score.frag_limit}` : 'No frag limit'} · via ${score.source === 'push' ? 'live push' : 'poll'}</div>
+                    </div>
+                `;
+            }).join('');
         }
         
         // Show visual notification for important events
@@ -722,16 +1061,16 @@
             send({ command: 'get_server_status' });
         }
         
-        function getPlayerStats(playerId) {
-            send({ command: 'get_player_stats', player_id: playerId });
+        function getPlayerStats(steamId) {
+            send({ command: 'get_player_stats', steam_id: steamId });
         }
         
         function getArenaDetails(arenaId) {
             send({ command: 'get_arena_details', arena_id: arenaId });
         }
         
-        function setPlayerReady(playerId, ready) {
-            send({ command: 'set_player_ready', player_id: playerId, ready: ready });
+        function setPlayerReady(steamId, ready) {
+            send({ command: 'set_player_ready', steam_id: steamId, ready: ready, secret: getSecret() });
         }
         
         function refreshAll() {
@@ -740,78 +1079,102 @@
             getServerStatus();
         }
         
-        function addPlayerToArena(playerId, arenaId) {
-            // If called from button, get values from parameters
-            // If called from dropdown, get values from selects
-            if (!playerId) {
-                playerId = document.getElementById('playerSelect').value;
+        function onArenaSelectChange() {
+            const arenaId = parseInt(document.getElementById('arenaSelect').value);
+            const arena = arenas.find(a => a.id === arenaId);
+            const teamSelect = document.getElementById('teamSelect');
+            teamSelect.style.display = (arena && arena.is2v2) ? '' : 'none';
+        }
+
+        function addPlayerToArena(playerSteamId, arenaId, team) {
+            if (!playerSteamId) {
+                playerSteamId = document.getElementById('playerSelect').value;
                 arenaId = document.getElementById('arenaSelect').value;
+                team = document.getElementById('teamSelect').value || undefined;
             }
-            
-            if (!playerId || !arenaId) {
+
+            if (!playerSteamId || !arenaId) {
                 log('Please select both player and arena');
                 return;
             }
-            
-            send({
+
+            const payload = {
                 command: 'add_player_to_arena',
-                player_id: parseInt(playerId),
-                arena_id: parseInt(arenaId)
-            });
+                steam_id: playerSteamId,
+                arena_id: parseInt(arenaId),
+                secret: getSecret()
+            };
+
+            if (team) payload.team = team;
+
+            send(payload);
         }
         
-        function removePlayerFromArena(playerId) {
-            if (!playerId) {
-                log('Invalid player ID');
+        function removePlayerFromArena(steamId) {
+            if (!steamId) {
+                log('Invalid steam_id');
                 return;
             }
-            
+
             send({
                 command: 'remove_player_from_arena',
-                player_id: parseInt(playerId)
+                steam_id: steamId,
+                secret: getSecret()
             });
         }
         
-        function showArenaSelector(playerId) {
-            const playerName = players.find(p => p.id === playerId)?.name || 'Unknown';
-            const arenaOptions = arenas.map(arena => 
-                `<option value="${arena.id}">${arena.name || `Arena ${arena.id}`} (${arena.players}/${arena.max})</option>`
+        function showArenaSelector(playerSteamId) {
+            const playerName = players.find(p => p.steam_id === playerSteamId)?.name || 'Unknown';
+            const arenaOptions = arenas.map(arena =>
+                `<option value="${arena.id}" data-is2v2="${arena.is2v2 ? '1' : '0'}">${arena.name || `Arena ${arena.id}`} (${arena.players}/${arena.max})${arena.is2v2 ? ' [2v2]' : ''}</option>`
             ).join('');
-            
+
             const modal = document.createElement('div');
             modal.style.cssText = `
-                position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-                background: rgba(0,0,0,0.5); display: flex; align-items: center; 
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.5); display: flex; align-items: center;
                 justify-content: center; z-index: 1000;
             `;
-            
+
             modal.innerHTML = `
-                <div style="background: white; padding: 20px; border-radius: 8px; min-width: 300px;">
+                <div style="background: white; padding: 20px; border-radius: 8px; min-width: 320px;">
                     <h3>Add ${playerName} to Arena</h3>
-                    <select id="quickArenaSelect" style="width: 100%; padding: 8px; margin: 10px 0;">
+                    <select id="quickArenaSelect" style="width: 100%; padding: 8px; margin: 10px 0;"
+                            onchange="onQuickArenaChange()">
                         <option value="">Select Arena...</option>
                         ${arenaOptions}
                     </select>
+                    <select id="quickTeamSelect" style="width: 100%; padding: 8px; margin: 4px 0; display: none;">
+                        <option value="">Auto-assign team</option>
+                        <option value="red">🔴 Red team</option>
+                        <option value="blu">🔵 Blu team</option>
+                    </select>
                     <div style="margin-top: 15px;">
-                        <button onclick="executeQuickAdd(${playerId})" class="btn-success">Add to Arena</button>
+                        <button onclick="executeQuickAdd('${playerSteamId}')" class="btn-success">Add to Arena</button>
                         <button onclick="closeModal()" style="margin-left: 10px;">Cancel</button>
                     </div>
                 </div>
             `;
-            
+
             document.body.appendChild(modal);
             modal.onclick = (e) => { if (e.target === modal) closeModal(); };
             window.currentModal = modal;
         }
-        
-        function executeQuickAdd(playerId) {
+
+        function onQuickArenaChange() {
+            const sel = document.getElementById('quickArenaSelect');
+            const opt = sel.options[sel.selectedIndex];
+            const teamSel = document.getElementById('quickTeamSelect');
+            if (teamSel) teamSel.style.display = (opt && opt.dataset.is2v2 === '1') ? '' : 'none';
+        }
+
+        function executeQuickAdd(playerSteamId) {
             const arenaId = document.getElementById('quickArenaSelect').value;
-            if (arenaId) {
-                addPlayerToArena(playerId, arenaId);
-                closeModal();
-            } else {
-                log('Please select an arena');
-            }
+            if (!arenaId) { log('Please select an arena'); return; }
+            const teamSel = document.getElementById('quickTeamSelect');
+            const team = (teamSel && teamSel.style.display !== 'none') ? teamSel.value || undefined : undefined;
+            addPlayerToArena(playerSteamId, arenaId, team);
+            closeModal();
         }
         
         function closeModal() {
@@ -824,51 +1187,58 @@
         function showPlayerSelector(arenaId) {
             const availablePlayers = players.filter(p => !p.inArena);
             const arenaInfo = arenas.find(a => a.id === arenaId);
-            
+
             if (availablePlayers.length === 0) {
                 log('No available players to add to arena');
                 return;
             }
-            
-            const playerOptions = availablePlayers.map(player => 
-                `<option value="${player.id}">${player.name}</option>`
+
+            const playerOptions = availablePlayers.map(player =>
+                `<option value="${player.steam_id}">${player.name}</option>`
             ).join('');
-            
+
+            const is2v2 = arenaInfo?.is2v2 ?? false;
+
             const modal = document.createElement('div');
             modal.style.cssText = `
-                position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-                background: rgba(0,0,0,0.5); display: flex; align-items: center; 
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.5); display: flex; align-items: center;
                 justify-content: center; z-index: 1000;
             `;
-            
+
             modal.innerHTML = `
-                <div style="background: white; padding: 20px; border-radius: 8px; min-width: 300px;">
+                <div style="background: white; padding: 20px; border-radius: 8px; min-width: 320px;">
                     <h3>Add Player to Arena ${arenaId}</h3>
-                    <p>Arena Type: ${arenaInfo?.is2v2 ? '2v2' : '1v1'} | Players: ${arenaInfo?.players}/${arenaInfo?.max}</p>
+                    <p>Arena Type: ${is2v2 ? '2v2' : '1v1'} | Players: ${arenaInfo?.players}/${arenaInfo?.max}</p>
                     <select id="quickPlayerSelect" style="width: 100%; padding: 8px; margin: 10px 0;">
                         <option value="">Select Player...</option>
                         ${playerOptions}
                     </select>
+                    ${is2v2 ? `
+                    <select id="quickArenaTeamSelect" style="width: 100%; padding: 8px; margin: 4px 0;">
+                        <option value="">Auto-assign team</option>
+                        <option value="red">🔴 Red team</option>
+                        <option value="blu">🔵 Blu team</option>
+                    </select>` : ''}
                     <div style="margin-top: 15px;">
-                        <button onclick="executeQuickAddToArena(${arenaId})" class="btn-success">Add Player</button>
+                        <button onclick="executeQuickAddToArena(${arenaId}, ${is2v2})" class="btn-success">Add Player</button>
                         <button onclick="closeModal()" style="margin-left: 10px;">Cancel</button>
                     </div>
                 </div>
             `;
-            
+
             document.body.appendChild(modal);
             modal.onclick = (e) => { if (e.target === modal) closeModal(); };
             window.currentModal = modal;
         }
-        
-        function executeQuickAddToArena(arenaId) {
+
+        function executeQuickAddToArena(arenaId, is2v2) {
             const playerId = document.getElementById('quickPlayerSelect').value;
-            if (playerId) {
-                addPlayerToArena(playerId, arenaId);
-                closeModal();
-            } else {
-                log('Please select a player');
-            }
+            if (!playerId) { log('Please select a player'); return; }
+            const teamSel = is2v2 ? document.getElementById('quickArenaTeamSelect') : null;
+            const team = teamSel ? teamSel.value || undefined : undefined;
+            addPlayerToArena(playerId, arenaId, team);
+            closeModal();
         }
         
         function updateArenaDisplay() {
@@ -937,7 +1307,7 @@
                         return `
                             <span style="display: inline-block; margin: 2px 4px 2px 0; padding: 2px 4px; background: #e9ecef; border-radius: 3px; font-size: 11px;">
                                 ${p.name}${readyIndicator}
-                                <button onclick="removePlayerFromArena(${p.id})" 
+                                <button onclick="removePlayerFromArena('${p.steam_id}')" 
                                         style="margin-left: 4px; padding: 1px 3px; font-size: 9px; background: #dc3545; color: white; border: none; border-radius: 2px; cursor: pointer;" title="Remove player">×</button>
                             </span>
                         `;
@@ -957,11 +1327,15 @@
                 }
                 
                 actionButtons.push(`<button onclick="getArenaDetails(${arena.id})" class="btn-sm" style="background: #17a2b8; color: white;" title="View arena details">ℹ️</button>`);
+
+                const redScore = arena.red_score ?? arenaScores[arena.id]?.red_score ?? 0;
+                const bluScore = arena.blu_score ?? arenaScores[arena.id]?.blu_score ?? 0;
                 
                 // Create table cells
                 row.innerHTML = `
                     <td><strong>${arena.name || `Arena ${arena.id}`}</strong></td>
                     <td class="status-cell">${arena.status_name || arena.status}</td>
+                    <td>${formatScoreDisplay(redScore, bluScore)}</td>
                     <td><strong>${arena.players}/${arena.max}</strong></td>
                     <td class="gamemode-cell">${arena.game_mode_names || (arena.is2v2 ? '👥 2v2' : '🎯 1v1')}</td>
                     <td class="players-cell">${playersDisplay}</td>
@@ -990,28 +1364,28 @@
                 const buttons = [];
                 
                 if (player.inArena) {
-                    buttons.push(`<button onclick="removePlayerFromArena(${player.id})" class="btn-sm btn-danger">Remove</button>`);
-                    buttons.push(`<button onclick="showArenaSelector(${player.id})" class="btn-sm btn-warning">Move</button>`);
+                    buttons.push(`<button onclick="removePlayerFromArena('${player.steam_id}')" class="btn-sm btn-danger">Remove</button>`);
+                    buttons.push(`<button onclick="showArenaSelector('${player.steam_id}')" class="btn-sm btn-warning">Move</button>`);
                     
                     // Add 2v2 ready controls
                     if (player.ready !== undefined) {
                         const readyBtn = player.ready ? 
-                            `<button onclick="setPlayerReady(${player.id}, false)" class="btn-sm" style="background: #dc3545; color: white;">Unready</button>` :
-                            `<button onclick="setPlayerReady(${player.id}, true)" class="btn-sm" style="background: #28a745; color: white;">Ready</button>`;
+                            `<button onclick="setPlayerReady('${player.steam_id}', false)" class="btn-sm" style="background: #dc3545; color: white;">Unready</button>` :
+                            `<button onclick="setPlayerReady('${player.steam_id}', true)" class="btn-sm" style="background: #28a745; color: white;">Ready</button>`;
                         buttons.push(readyBtn);
                     }
                 } else {
-                    buttons.push(`<button onclick="showArenaSelector(${player.id})" class="btn-sm btn-success">Add to Arena</button>`);
+                    buttons.push(`<button onclick="showArenaSelector('${player.steam_id}')" class="btn-sm btn-success">Add to Arena</button>`);
                 }
                 
-                buttons.push(`<button onclick="getPlayerStats(${player.id})" class="btn-sm" style="background: #17a2b8; color: white;">Stats</button>`);
+                buttons.push(`<button onclick="getPlayerStats('${player.steam_id}')" class="btn-sm" style="background: #17a2b8; color: white;">Stats</button>`);
                 
                 if (buttons.length > 0) {
                     actionButtons = `<div class="player-actions">${buttons.join(' ')}</div>`;
                 }
                 
                 // Build player info
-                let playerInfo = `<strong>${player.name}</strong><br><small>ID: ${player.id}</small>`;
+                let playerInfo = `<strong>${player.name}</strong><br><small>SteamID: ${player.steam_id || 'n/a'}</small>`;
                 
                 // Add ELO if available
                 if (player.elo !== undefined) {
@@ -1051,13 +1425,16 @@
         function updateArenaSelect() {
             const select = document.getElementById('arenaSelect');
             select.innerHTML = '<option value="">Select Arena...</option>';
-            
+
             arenas.forEach(arena => {
                 const option = document.createElement('option');
                 option.value = arena.id;
-                option.textContent = `${arena.name || `Arena ${arena.id}`} (${arena.players}/${arena.max})`;
+                option.dataset.is2v2 = arena.is2v2 ? '1' : '0';
+                option.textContent = `${arena.name || `Arena ${arena.id}`} (${arena.players}/${arena.max})${arena.is2v2 ? ' [2v2]' : ''}`;
                 select.appendChild(option);
             });
+
+            onArenaSelectChange();
         }
         
         function updatePlayerSelect() {
@@ -1066,7 +1443,7 @@
             
             players.forEach(player => {
                 const option = document.createElement('option');
-                option.value = player.id;
+                option.value = player.steam_id;
                 option.textContent = `${player.name} ${player.inArena ? '(in arena)' : ''}`;
                 select.appendChild(option);
             });
@@ -1078,7 +1455,7 @@
                 
                 players.filter(p => p.inArena).forEach(player => {
                     const option = document.createElement('option');
-                    option.value = player.id;
+                    option.value = player.steam_id;
                     const playerArena = arenas.find(a => a.id === player.arena);
                     const arenaName = playerArena ? playerArena.name || `Arena ${player.arena}` : `Arena ${player.arena}`;
                     option.textContent = `${player.name} (${arenaName})`;
@@ -1088,12 +1465,12 @@
         }
         
         function removePlayerFromArenaManual() {
-            const playerId = document.getElementById('playerRemoveSelect').value;
-            if (!playerId) {
+            const steamId = document.getElementById('playerRemoveSelect').value;
+            if (!steamId) {
                 log('Please select a player to remove');
                 return;
             }
-            removePlayerFromArena(playerId);
+            removePlayerFromArena(steamId);
         }
         
         function clearLog() {
@@ -1215,6 +1592,15 @@
             modal.innerHTML = `
                 <div class="stats-content">
                     <h2>${data.arena_name || `Arena ${data.arena_id}`} Details</h2>
+                    <h3 style="margin-bottom: 8px; color: #c05600;">Live Score (get_arena_details)</h3>
+                    <div class="details-score-banner">
+                        <span class="score-red">${data.red_score ?? 0}</span>
+                        <span class="score-separator">–</span>
+                        <span class="score-blu">${data.blu_score ?? 0}</span>
+                    </div>
+                    <p style="text-align: center; color: #6c757d; margin-top: -8px;">
+                        ${data.frag_limit ? `First to ${data.frag_limit}` : 'No frag limit'}
+                    </p>
                     <p><strong>Status:</strong> ${data.status_name || data.status}</p>
                     <p><strong>Players:</strong> ${data.players}/${data.max_slots}</p>
                     <p><strong>Type:</strong> ${data.is_2v2 ? '👥 2v2' : '🎯 1v1'}</p>
