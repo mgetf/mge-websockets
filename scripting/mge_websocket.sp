@@ -92,7 +92,7 @@ void OnOpen(WebSocketServer ws, const char[] RemoteAddr, const char[] RemoteId)
     PrintToServer("[MGE WS] Client connected: %s", RemoteAddr);
     
     // Send welcome message using yyjson
-    YYJSONObject welcome = new YYJSONObject();
+    JSONObject welcome = new JSONObject();
     welcome.SetString("type", "welcome");
     welcome.SetString("message", "Connected to MGE WebSocket");
     welcome.SetInt("arenas", MGE_GetArenaCount());
@@ -119,7 +119,7 @@ void OnMessage(WebSocketServer ws, WebSocket client, const char[] message, int w
     PrintToServer("[MGE WS] Message from %s: %s", RemoteAddr, message);
     
     // Parse JSON properly
-    YYJSONObject request = YYJSONObject.FromString(message);
+    JSONObject request = JSONObject.FromString(message);
     if (request == null)
     {
         SendErrorResponse(ws, RemoteId, "Invalid JSON format");
@@ -179,12 +179,12 @@ void OnMessage(WebSocketServer ws, WebSocket client, const char[] message, int w
 void HandleGetArenas(WebSocketServer ws, const char[] clientId)
 {
     // Create response object
-    YYJSONObject response = new YYJSONObject();
+    JSONObject response = new JSONObject();
     response.SetString("type", "response");
     response.SetString("command", "get_arenas");
     
     // Create arenas array
-    YYJSONArray arenas = new YYJSONArray();
+    JSONArray arenas = new JSONArray();
     
     int arenaCount = MGE_GetArenaCount();
     for (int i = 1; i <= arenaCount; i++)
@@ -192,7 +192,7 @@ void HandleGetArenas(WebSocketServer ws, const char[] clientId)
         if (!MGE_IsValidArena(i))
             continue;
             
-        YYJSONObject arena = new YYJSONObject();
+        JSONObject arena = new JSONObject();
         arena.SetInt("id", i);
         
         // Get all arena info in one call using the struct
@@ -229,12 +229,12 @@ void HandleGetArenas(WebSocketServer ws, const char[] clientId)
 void HandleGetPlayers(WebSocketServer ws, const char[] clientId)
 {
     // Create response object
-    YYJSONObject response = new YYJSONObject();
+    JSONObject response = new JSONObject();
     response.SetString("type", "response");
     response.SetString("command", "get_players");
     
     // Create players array
-    YYJSONArray players = new YYJSONArray();
+    JSONArray players = new JSONArray();
     
     for (int client = 1; client <= MaxClients; client++)
     {
@@ -244,7 +244,7 @@ void HandleGetPlayers(WebSocketServer ws, const char[] clientId)
         char name[64];
         GetClientName(client, name, sizeof(name));
         
-        YYJSONObject player = new YYJSONObject();
+        JSONObject player = new JSONObject();
         player.SetInt("id", client);
         player.SetString("name", name);  // yyjson handles escaping automatically
         player.SetInt("arena", MGE_GetPlayerArena(client));
@@ -290,7 +290,7 @@ void HandleGetPlayers(WebSocketServer ws, const char[] clientId)
     delete response;
 }
 
-void HandleAddPlayerToArena(WebSocketServer ws, const char[] clientId, YYJSONObject request)
+void HandleAddPlayerToArena(WebSocketServer ws, const char[] clientId, JSONObject request)
 {
     // Extract parameters from JSON
     int playerId = request.GetInt("player_id");
@@ -312,7 +312,7 @@ void HandleAddPlayerToArena(WebSocketServer ws, const char[] clientId, YYJSONObj
     // Attempt to add player to arena
     bool success = MGE_AddPlayerToArena(playerId, arenaId);
     
-    YYJSONObject response = new YYJSONObject();
+    JSONObject response = new JSONObject();
     if (success)
     {
         char playerName[64];
@@ -340,7 +340,7 @@ void HandleAddPlayerToArena(WebSocketServer ws, const char[] clientId, YYJSONObj
     delete response;
 }
 
-void HandleRemovePlayerFromArena(WebSocketServer ws, const char[] clientId, YYJSONObject request)
+void HandleRemovePlayerFromArena(WebSocketServer ws, const char[] clientId, JSONObject request)
 {
     // Extract player ID from JSON
     int playerId = request.GetInt("player_id");
@@ -367,7 +367,7 @@ void HandleRemovePlayerFromArena(WebSocketServer ws, const char[] clientId, YYJS
     // Attempt to remove player from arena
     bool success = MGE_RemovePlayerFromArena(playerId);
     
-    YYJSONObject response = new YYJSONObject();
+    JSONObject response = new JSONObject();
     if (success)
     {
         response.SetString("type", "success");
@@ -393,7 +393,7 @@ void HandleRemovePlayerFromArena(WebSocketServer ws, const char[] clientId, YYJS
     delete response;
 }
 
-void HandleGetPlayerStats(WebSocketServer ws, const char[] clientId, YYJSONObject request)
+void HandleGetPlayerStats(WebSocketServer ws, const char[] clientId, JSONObject request)
 {
     int playerId = request.GetInt("player_id");
     
@@ -406,7 +406,7 @@ void HandleGetPlayerStats(WebSocketServer ws, const char[] clientId, YYJSONObjec
     char playerName[64];
     GetClientName(playerId, playerName, sizeof(playerName));
     
-    YYJSONObject response = new YYJSONObject();
+    JSONObject response = new JSONObject();
     response.SetString("type", "response");
     response.SetString("command", "get_player_stats");
     response.SetInt("player_id", playerId);
@@ -415,7 +415,7 @@ void HandleGetPlayerStats(WebSocketServer ws, const char[] clientId, YYJSONObjec
     MGEPlayerStats stats;
     if (MGE_GetPlayerStats(playerId, stats))
     {
-        YYJSONObject playerStats = new YYJSONObject();
+        JSONObject playerStats = new JSONObject();
         playerStats.SetInt("elo", stats.elo);
         playerStats.SetInt("kills", stats.kills);
         playerStats.SetInt("deaths", stats.deaths);
@@ -468,7 +468,7 @@ void HandleGetPlayerStats(WebSocketServer ws, const char[] clientId, YYJSONObjec
     delete response;
 }
 
-void HandleGetArenaDetails(WebSocketServer ws, const char[] clientId, YYJSONObject request)
+void HandleGetArenaDetails(WebSocketServer ws, const char[] clientId, JSONObject request)
 {
     int arenaId = request.GetInt("arena_id");
     
@@ -478,7 +478,7 @@ void HandleGetArenaDetails(WebSocketServer ws, const char[] clientId, YYJSONObje
         return;
     }
     
-    YYJSONObject response = new YYJSONObject();
+    JSONObject response = new JSONObject();
     response.SetString("type", "response");
     response.SetString("command", "get_arena_details");
     response.SetInt("arena_id", arenaId);
@@ -502,12 +502,12 @@ void HandleGetArenaDetails(WebSocketServer ws, const char[] clientId, YYJSONObje
     response.SetInt("frag_limit", arenaInfo.fragLimit);
     
     // Player slot details
-    YYJSONArray slots = new YYJSONArray();
+    JSONArray slots = new JSONArray();
     int maxSlots = arenaInfo.maxSlots;
     
     for (int slot = 1; slot <= maxSlots; slot++)
     {
-        YYJSONObject slotInfo = new YYJSONObject();
+        JSONObject slotInfo = new JSONObject();
         slotInfo.SetInt("slot", slot);
         slotInfo.SetBool("valid", MGE_IsValidSlotForArena(arenaId, slot));
         
@@ -544,7 +544,7 @@ void HandleGetArenaDetails(WebSocketServer ws, const char[] clientId, YYJSONObje
     delete response;
 }
 
-void HandleSetPlayerReady(WebSocketServer ws, const char[] clientId, YYJSONObject request)
+void HandleSetPlayerReady(WebSocketServer ws, const char[] clientId, JSONObject request)
 {
     int playerId = request.GetInt("player_id");
     bool ready = request.GetBool("ready");
@@ -570,7 +570,7 @@ void HandleSetPlayerReady(WebSocketServer ws, const char[] clientId, YYJSONObjec
     
     bool success = MGE_SetPlayerReady(playerId, ready);
     
-    YYJSONObject response = new YYJSONObject();
+    JSONObject response = new JSONObject();
     if (success)
     {
         char playerName[64];
@@ -600,7 +600,7 @@ void HandleSetPlayerReady(WebSocketServer ws, const char[] clientId, YYJSONObjec
 
 void HandleGetServerStatus(WebSocketServer ws, const char[] clientId)
 {
-    YYJSONObject response = new YYJSONObject();
+    JSONObject response = new JSONObject();
     response.SetString("type", "response");
     response.SetString("command", "get_server_status");
     
@@ -621,7 +621,7 @@ void HandleGetServerStatus(WebSocketServer ws, const char[] clientId)
     int activeFights = 0;
     int readyPhases = 0;
     
-    YYJSONArray gameModeStats = new YYJSONArray();
+    JSONArray gameModeStats = new JSONArray();
     int gameModeCount[9]; // Track count for each game mode
     
     for (int i = 1; i <= MGE_GetArenaCount(); i++)
@@ -656,7 +656,7 @@ void HandleGetServerStatus(WebSocketServer ws, const char[] clientId)
     {
         if (gameModeCount[i] > 0)
         {
-            YYJSONObject modeInfo = new YYJSONObject();
+            JSONObject modeInfo = new JSONObject();
             modeInfo.SetString("name", gameModeNames[i]);
             modeInfo.SetInt("count", gameModeCount[i]);
             gameModeStats.Push(modeInfo);
@@ -678,7 +678,7 @@ void HandleGetServerStatus(WebSocketServer ws, const char[] clientId)
 
 void SendErrorResponse(WebSocketServer ws, const char[] clientId, const char[] errorMessage)
 {
-    YYJSONObject response = new YYJSONObject();
+    JSONObject response = new JSONObject();
     response.SetString("type", "error");
     response.SetString("message", errorMessage);
     
@@ -743,7 +743,7 @@ public void MGE_OnPlayerArenaAdded(int client, int arena_index, int slot)
     char playerName[64];
     GetClientName(client, playerName, sizeof(playerName));
     
-    YYJSONObject event = new YYJSONObject();
+    JSONObject event = new JSONObject();
     event.SetString("type", "event");
     event.SetString("event", "player_arena_added");
     event.SetInt("player_id", GetClientUserId(client));
@@ -765,7 +765,7 @@ public void MGE_OnPlayerArenaRemoved(int client, int arena_index)
     char playerName[64];
     GetClientName(client, playerName, sizeof(playerName));
     
-    YYJSONObject event = new YYJSONObject();
+    JSONObject event = new JSONObject();
     event.SetString("type", "event");
     event.SetString("event", "player_arena_removed");
     event.SetInt("player_id", GetClientUserId(client));
@@ -787,7 +787,7 @@ public void MGE_On1v1MatchStart(int arena_index, int player1, int player2)
     GetClientName(player1, player1Name, sizeof(player1Name));
     GetClientName(player2, player2Name, sizeof(player2Name));
     
-    YYJSONObject event = new YYJSONObject();
+    JSONObject event = new JSONObject();
     event.SetString("type", "event");
     event.SetString("event", "match_start_1v1");
     event.SetInt("arena_id", arena_index);
@@ -811,7 +811,7 @@ public void MGE_On1v1MatchEnd(int arena_index, int winner, int loser, int winner
     GetClientName(winner, winnerName, sizeof(winnerName));
     GetClientName(loser, loserName, sizeof(loserName));
     
-    YYJSONObject event = new YYJSONObject();
+    JSONObject event = new JSONObject();
     event.SetString("type", "event");
     event.SetString("event", "match_end_1v1");
     event.SetInt("arena_id", arena_index);
@@ -840,7 +840,7 @@ public void MGE_On2v2MatchStart(int arena_index, int team1_player1, int team1_pl
     GetClientName(team2_player1, t2p1Name, sizeof(t2p1Name));
     GetClientName(team2_player2, t2p2Name, sizeof(t2p2Name));
     
-    YYJSONObject event = new YYJSONObject();
+    JSONObject event = new JSONObject();
     event.SetString("type", "event");
     event.SetString("event", "match_start_2v2");
     event.SetInt("arena_id", arena_index);
@@ -872,7 +872,7 @@ public void MGE_On2v2MatchEnd(int arena_index, int winning_team, int winning_sco
     GetClientName(team2_player1, t2p1Name, sizeof(t2p1Name));
     GetClientName(team2_player2, t2p2Name, sizeof(t2p2Name));
     
-    YYJSONObject event = new YYJSONObject();
+    JSONObject event = new JSONObject();
     event.SetString("type", "event");
     event.SetString("event", "match_end_2v2");
     event.SetInt("arena_id", arena_index);
@@ -907,7 +907,7 @@ public void MGE_OnArenaPlayerDeath(int victim, int attacker, int arena_index)
     else
         strcopy(attackerName, sizeof(attackerName), "World");
     
-    YYJSONObject event = new YYJSONObject();
+    JSONObject event = new JSONObject();
     event.SetString("type", "event");
     event.SetString("event", "arena_player_death");
     event.SetInt("victim_id", GetClientUserId(victim));
@@ -930,7 +930,7 @@ public void MGE_OnPlayerELOChange(int client, int old_elo, int new_elo, int aren
     char playerName[64];
     GetClientName(client, playerName, sizeof(playerName));
     
-    YYJSONObject event = new YYJSONObject();
+    JSONObject event = new JSONObject();
     event.SetString("type", "event");
     event.SetString("event", "player_elo_change");
     event.SetInt("player_id", GetClientUserId(client));
@@ -948,7 +948,7 @@ public void MGE_OnPlayerELOChange(int client, int old_elo, int new_elo, int aren
 // Called when 2v2 ready system starts
 public void MGE_On2v2ReadyStart(int arena_index)
 {
-    YYJSONObject event = new YYJSONObject();
+    JSONObject event = new JSONObject();
     event.SetString("type", "event");
     event.SetString("event", "2v2_ready_start");
     event.SetInt("arena_id", arena_index);
@@ -967,7 +967,7 @@ public void MGE_On2v2PlayerReady(int client, int arena_index, bool ready_status)
     char playerName[64];
     GetClientName(client, playerName, sizeof(playerName));
     
-    YYJSONObject event = new YYJSONObject();
+    JSONObject event = new JSONObject();
     event.SetString("type", "event");
     event.SetString("event", "2v2_player_ready");
     event.SetInt("player_id", GetClientUserId(client));
@@ -1026,7 +1026,7 @@ int GetArenaGameMode_Safe(int arena_index)
 }
 
 // Broadcasts an event to all connected WebSocket clients
-void BroadcastToAllClients(YYJSONObject event)
+void BroadcastToAllClients(JSONObject event)
 {
     if (g_hWebSocketServer == null)
         return;
