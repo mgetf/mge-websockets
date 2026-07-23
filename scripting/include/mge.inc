@@ -60,6 +60,16 @@ enum
     AS_WAITING_READY
 };
 
+enum MGEPlayerStatsLoadState
+{
+    MGE_STATS_NONE = 0,
+    MGE_STATS_LOADING,
+    MGE_STATS_LOADED,
+    MGE_STATS_AUTH_FAILED,
+    MGE_STATS_DB_FAILED,
+    MGE_STATS_DISABLED
+};
+
 /**
  * Called before a player is added to an arena - can be blocked
  *
@@ -161,6 +171,15 @@ forward void MGE_OnArenaPlayerDeath(int victim, int attacker, int arena_index);
 forward void MGE_OnPlayerELOChange(int client, int old_elo, int new_elo, int arena_index);
 
 /**
+ * Called when a player's statistics loading state changes
+ *
+ * @param client         Client index
+ * @param old_state      Previous MGEPlayerStatsLoadState value
+ * @param new_state      New MGEPlayerStatsLoadState value
+ */
+forward void MGE_OnPlayerStatsLoadStateChanged(int client, MGEPlayerStatsLoadState old_state, MGEPlayerStatsLoadState new_state);
+
+/**
  * Called when 2v2 ready system starts
  *
  * @param arena_index    2v2 arena index
@@ -184,6 +203,16 @@ forward void MGE_On2v2PlayerReady(int client, int arena_index, bool ready_status
  * @param blu_score      Blue team score (SLOT_TWO)
  */
 forward void MGE_OnArenaScoreChange(int arena_index, int red_score, int blu_score);
+
+/**
+ * Called whenever an arena's status changes, regardless of cause (countdown, fight start/end,
+ * a player leaving mid-match, timeout, etc.)
+ *
+ * @param arena_index    Arena index
+ * @param old_status     Previous status (AS_* constant)
+ * @param new_status     New status (AS_* constant)
+ */
+forward void MGE_OnArenaStatusChange(int arena_index, int old_status, int new_status);
 
 /**
  * Called when a map config file is missing
@@ -234,6 +263,14 @@ native int MGE_GetPlayerArena(int client);
 native bool MGE_GetPlayerStats(int client, any[] stats);
 
 /**
+ * Gets a player's statistics loading state
+ *
+ * @param client         Client index
+ * @return               Current MGEPlayerStatsLoadState value
+ */
+native MGEPlayerStatsLoadState MGE_GetPlayerStatsLoadState(int client);
+
+/**
  * Gets complete arena information
  *
  * @param arena_index    Arena index
@@ -243,10 +280,13 @@ native bool MGE_GetPlayerStats(int client, any[] stats);
 native bool MGE_GetArenaInfo(int arena_index, any[] info);
 
 /**
- * Checks if a player is currently in an MGE arena
+ * Checks if a player currently occupies an active arena slot - either
+ * waiting to play (e.g. alone in the arena, or during countdown) or
+ * actively playing. Players queued behind the active slots (spectating
+ * while waiting for their turn) are NOT considered to be "in arena".
  *
  * @param client         Client index
- * @return               True if in arena, false otherwise
+ * @return               True if occupying an active slot, false otherwise
  */
 native bool MGE_IsPlayerInArena(int client);
 
@@ -364,6 +404,7 @@ public void __pl_mge_SetNTVOptional()
 {
     MarkNativeAsOptional("MGE_GetPlayerArena");
     MarkNativeAsOptional("MGE_GetPlayerStats");
+    MarkNativeAsOptional("MGE_GetPlayerStatsLoadState");
     MarkNativeAsOptional("MGE_GetArenaInfo");
     MarkNativeAsOptional("MGE_IsPlayerInArena");
     MarkNativeAsOptional("MGE_GetArenaCount");
