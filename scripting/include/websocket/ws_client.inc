@@ -1,3 +1,12 @@
+/**
+ * The upstream file's JSON-mode declarations (WriteJSON native and the JSON-flavored
+ * OnMessage callback overload) reference a `JSON` type from sm-ext-json, which collides
+ * with ripext's own JSON/JSONObject/JSONArray methodmap names if both are included in the
+ * same plugin. This plugin only ever uses WebSocket_STRING mode and does its own JSON
+ * encode/decode via ripext, so those two JSON-mode declarations are dropped here rather
+ * than pulling in sm-ext-json's json.inc just to satisfy their signatures.
+ */
+
 enum WebSocketState
 {
   CONNECTING,
@@ -28,14 +37,6 @@ typeset WebsocketCallback
   * @param wireSize          size of the message on the wire (including null terminator)
   */
   function void (WebSocket ws, const char[] message, int wireSize);
-
-  /**
-  * OnMessage (JSON) - Called when a JSON message is received
-  * @param ws                WebSocket handle
-  * @param data              JSON data
-  * @param wireSize          size of the message on the wire (including null terminator)
-  */
-  function void (WebSocket ws, const JSON data, int wireSize);
 
   /**
   * OnClose - Called when the WebSocket connection is closed
@@ -118,14 +119,6 @@ methodmap WebSocket < Handle
   * @param message           Message to send
   */
   public native void WriteString(const char[] message);
-
-  /**
-  * Send a JSON message over the WebSocket connection
-  *
-  * @param data              JSON data to send
-  * @param write_flg         Write flags (JSON_WRITE_FLAG values, default: JSON_WRITE_NOFLAG)
-  */
-  public native void WriteJSON(const JSON data, JSON_WRITE_FLAG write_flg = JSON_WRITE_NOFLAG);
 
   /**
   * Open the WebSocket connection

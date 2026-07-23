@@ -3,10 +3,14 @@
 #endif
 #define _websocket_included
 
-#undef REQUIRE_EXTENSIONS
-#include <json>
-#define REQUIRE_EXTENSIONS
-#include <websocket/http>
+/**
+ * Trimmed vendored copy of sm-ext-websocket's barrel include.
+ *
+ * Upstream also pulls in <json> (for JSON-mode WebSocket/HTTP helpers) and websocket/http.
+ * This plugin is a WebSocket server only, always in WebSocket_STRING mode (JSON is handled
+ * via ripext, see scripting/include/websocket/ws_client.inc), so none of those are needed
+ * here and are intentionally left out to avoid a JSON methodmap collision with ripext.
+ */
 #include <websocket/ws_client>
 #include <websocket/ws_server>
 

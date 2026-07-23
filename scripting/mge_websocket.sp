@@ -2,6 +2,7 @@
 #pragma newdecls required
 
 #include <sourcemod>
+#include <ripext>
 #include <websocket>
 #include <mge>
 
@@ -122,7 +123,6 @@ void OnOpen(WebSocketServer ws, const char[] RemoteAddr, const char[] RemoteId)
 {
     PrintToServer("[MGE WS] Client connected: %s", RemoteAddr);
     
-    // Send welcome message using yyjson
     JSONObject welcome = new JSONObject();
     welcome.SetString("type", "welcome");
     welcome.SetString("message", "Connected to MGE WebSocket");
@@ -323,7 +323,7 @@ void HandleAddPlayerToArena(WebSocketServer ws, const char[] clientId, JSONObjec
     }
 
     int client = 0;
-    int arenaId = request.GetInt("arena_id");
+    int arenaId = request.HasKey("arena_id") ? request.GetInt("arena_id") : 0;
 
     if (!ResolveClientFromRequest(request, client))
     {
@@ -341,7 +341,7 @@ void HandleAddPlayerToArena(WebSocketServer ws, const char[] clientId, JSONObjec
     MGE_GetArenaInfo(arenaId, arenaInfo);
 
     // Resolve target slot: explicit 'slot' takes priority, then 'team' preference for 2v2
-    int slot = request.GetInt("slot"); // 0 if absent = auto-assign
+    int slot = request.HasKey("slot") ? request.GetInt("slot") : 0; // 0 if absent = auto-assign
 
     if (slot == 0)
     {
@@ -536,7 +536,7 @@ void HandleGetPlayerStats(WebSocketServer ws, const char[] clientId, JSONObject 
 
 void HandleGetArenaDetails(WebSocketServer ws, const char[] clientId, JSONObject request)
 {
-    int arenaId = request.GetInt("arena_id");
+    int arenaId = request.HasKey("arena_id") ? request.GetInt("arena_id") : 0;
     
     if (arenaId <= 0 || !MGE_IsValidArena(arenaId))
     {
@@ -618,7 +618,7 @@ void HandleSetPlayerReady(WebSocketServer ws, const char[] clientId, JSONObject 
     }
 
     int client = 0;
-    bool ready = request.GetBool("ready");
+    bool ready = request.HasKey("ready") ? request.GetBool("ready") : false;
 
     if (!ResolveClientFromRequest(request, client))
     {
@@ -761,7 +761,7 @@ bool IsWriteAuthorized(JSONObject request)
 bool SendJsonToClient(WebSocketServer ws, const char[] clientId, JSONObject obj)
 {
     char json[MGE_WS_JSON_MAX];
-    if (obj.ToString(json, sizeof(json)) < 1)
+    if (!obj.ToString(json, sizeof(json)))
         return false;
 
     ws.SendMessageToClient(clientId, json);
@@ -1184,7 +1184,7 @@ void BroadcastToAllClients(JSONObject event)
         return;
 
     char json[MGE_WS_JSON_MAX];
-    if (event.ToString(json, sizeof(json)) < 1)
+    if (!event.ToString(json, sizeof(json)))
         return;
 
     g_hWebSocketServer.BroadcastMessage(json);

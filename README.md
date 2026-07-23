@@ -9,7 +9,7 @@ A SourceMod plugin that exposes real-time MGEMod data over a WebSocket connectio
 | **MGEMod** | **≥ 3.1.0-beta24** |
 | SourceMod | ≥ 1.12.x |
 | [sm-ext-websocket](https://github.com/nicklvsa/sm-ext-websocket) | latest |
-| [yyjson extension](https://github.com/ProjectSky/sm-ext-yyjson) | latest |
+| [sm-ripext](https://github.com/ErikMinekus/sm-ripext) | latest |
 
 > MGEMod 3.1.0-beta24 introduced the `MGE_OnArenaScoreChange` forward and `MGE_GetArenaScore` native that this plugin depends on for live score tracking. Earlier versions will fail to load the plugin.
 
@@ -18,7 +18,7 @@ A SourceMod plugin that exposes real-time MGEMod data over a WebSocket connectio
 ## Installation
 
 1. Copy `plugins/mge_websocket.smx` to `addons/sourcemod/plugins/`.
-2. Ensure the websocket and yyjson SourceMod extensions are installed.
+2. Ensure the websocket and ripext SourceMod extensions are installed.
 3. Restart the server or `sm plugins load mge_websocket`.
 4. The WebSocket server starts automatically 2 seconds after plugin load.
 
