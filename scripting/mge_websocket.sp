@@ -9,10 +9,10 @@
 public Plugin myinfo = 
 {
     name = "MGE WebSocket Bridge",
-    author = "MGE Community",
+    author = "mge.tf",
     description = "WebSocket interface for MGE real-time data",
-    version = "1.1",
-    url = ""
+    version = "1.2",
+    url = "github.com/mgetf"
 };
 
 // ===== WEBSOCKET SERVER =====
@@ -1085,6 +1085,14 @@ public void MGE_OnArenaScoreChange(int arena_index, int red_score, int blu_score
     BroadcastArenaScoreUpdateEx(arena_index, red_score, blu_score);
 }
 
+public void MGE_OnArenaStatusChange(int arena_index, int old_status, int new_status)
+{
+    if (!MGE_IsValidArena(arena_index))
+        return;
+
+    BroadcastArenaStatusChange(arena_index, old_status, new_status);
+}
+
 // ===== UTILITY FUNCTIONS =====
 
 // Validates if a client is valid and in-game
@@ -1222,6 +1230,30 @@ void BroadcastArenaScoreUpdateEx(int arena_index, int red_score, int blu_score)
     event.SetInt("red_score", red_score);
     event.SetInt("blu_score", blu_score);
     event.SetInt("frag_limit", fragLimit);
+    event.SetInt("timestamp", GetTime());
+
+    BroadcastToAllClients(event);
+    delete event;
+}
+
+// Broadcasts an arena's old/new status to all WebSocket clients
+void BroadcastArenaStatusChange(int arena_index, int old_status, int new_status)
+{
+    MGEArenaInfo arenaInfo;
+    if (!MGE_GetArenaInfo(arena_index, arenaInfo))
+        return;
+
+    JSONObject event = new JSONObject();
+    event.SetString("type", "event");
+    event.SetString("event", "arena_status_change");
+    event.SetInt("arena_id", arena_index);
+    event.SetString("arena_name", arenaInfo.name);
+    event.SetInt("old_status", old_status);
+    event.SetString("old_status_name", GetArenaStatusName(old_status));
+    event.SetInt("status", new_status);
+    event.SetString("status_name", GetArenaStatusName(new_status));
+    event.SetInt("players", arenaInfo.players);
+    event.SetInt("max", arenaInfo.maxSlots);
     event.SetInt("timestamp", GetTime());
 
     BroadcastToAllClients(event);

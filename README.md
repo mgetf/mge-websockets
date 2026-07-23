@@ -6,12 +6,12 @@ A SourceMod plugin that exposes real-time MGEMod data over a WebSocket connectio
 
 | Dependency | Version |
 |---|---|
-| **MGEMod** | **≥ 3.1.0-beta24** |
+| **MGEMod** | **≥ 3.1.0-beta28** |
 | SourceMod | ≥ 1.12.x |
 | [sm-ext-websocket](https://github.com/nicklvsa/sm-ext-websocket) | latest |
 | [sm-ripext](https://github.com/ErikMinekus/sm-ripext) | latest |
 
-> MGEMod 3.1.0-beta24 introduced the `MGE_OnArenaScoreChange` forward and `MGE_GetArenaScore` native that this plugin depends on for live score tracking. Earlier versions will fail to load the plugin.
+> MGEMod 3.1.0-beta24 introduced the `MGE_OnArenaScoreChange` forward and `MGE_GetArenaScore` native that this plugin depends on for live score tracking. MGEMod 3.1.0-beta28 introduced the `MGE_OnArenaStatusChange` forward that this plugin depends on for instant, unconditional arena status updates. Earlier versions will fail to load the plugin.
 
 ---
 
@@ -592,6 +592,34 @@ For 2v2 arenas `red_score` is team 1 (slots 1, 3) and `blu_score` is team 2 (slo
 
 ---
 
+### `arena_status_change`
+
+Fired whenever an arena's status changes, for any reason. This is a real push forward
+(`MGE_OnArenaStatusChange`) that MGEMod calls from a single setter every time it writes an
+arena's status, so it fires instantly with no polling latency and reliably catches transitions
+that `player_arena_removed` and the match-end events can miss, such as a player leaving
+mid-fight with no one else queued.
+
+```json
+{
+  "type": "event",
+  "event": "arena_status_change",
+  "arena_id": 1,
+  "arena_name": "Spire",
+  "old_status": 3,
+  "old_status_name": "🔥 Fighting",
+  "status": 0,
+  "status_name": "🟢 Idle",
+  "players": 0,
+  "max": 2,
+  "timestamp": 1719432140
+}
+```
+
+See [`get_arenas`](#get_arenas) for the full list of `status` values.
+
+---
+
 ### `arena_player_death`
 
 Fired on every in-arena kill. `attacker_steam_id` is an empty string for environmental deaths.
@@ -703,7 +731,7 @@ Common messages:
 1. On connect, send `get_arenas` to populate initial state.
 2. Listen for `match_start_1v1` / `match_start_2v2` to open a score card — a `score_update` with 0–0 is always emitted immediately after.
 3. Update the card on each `score_update`.
-4. Close the card on `match_end_1v1` / `match_end_2v2` or when `player_arena_removed` empties an arena that was active.
+4. Close the card on `match_end_1v1` / `match_end_2v2`, or on `arena_status_change` when `status` drops below `AS_FIGHT` (3). Prefer this over `player_arena_removed` for detecting an aborted fight — that event is not always fired when a player leaves mid-match, while `arena_status_change` always is.
 5. Optionally poll `get_arenas` every few seconds as a fallback sync.
 
 ### LAN production overlay (read-only)
