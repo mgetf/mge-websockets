@@ -11,7 +11,7 @@ public Plugin myinfo =
     name = "MGE WebSocket Bridge",
     author = "MGE Community",
     description = "WebSocket interface for MGE real-time data",
-    version = "1.0",
+    version = "1.1",
     url = ""
 };
 
